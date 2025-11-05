@@ -1,57 +1,106 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue"
+import { nextTick, ref } from "vue"
 
-const { word: wordProp } = defineProps<{
+const props = defineProps<{
   word?: string
 }>()
 
 type Input = {
   isLocked: boolean
   values: string[]
-  refs: HTMLInputElement[]
+  refs: (HTMLInputElement | null)[]
 }
 
 const length = 5
-const word = "hello"
+const word = props.word || "hello"
+const maxAttempts = 6
 
-// const inputs = ref<Input[]>(Array(length).fill({ isLocked: true, values: [] }))
-const inputs = ref<Input[]>([
-  { isLocked: false, values: Array(length).fill(""), refs: Array(length).fill(null) },
-  { isLocked: true, values: Array(length).fill(""), refs: Array(length).fill(null) },
-  { isLocked: true, values: Array(length).fill(""), refs: Array(length).fill(null) },
-])
+const inputs = ref<Input[]>(
+  Array.from({ length: maxAttempts }, (_, i) => ({
+    isLocked: i !== 0,
+    values: Array.from({ length }, () => ""),
+    refs: Array.from({ length }, () => null),
+  }))
+)
+
+type GameStatus = 'playing' | 'won' | 'lost'
+const gameStatus = ref<GameStatus>('playing')
 
 const check = async (inputIndex: number) => {
-  inputs.value[inputIndex].refs.forEach((input, index) => {
-    if (input.value === word[index]) {
-      setTimeout(() => {
-        input.style.backgroundColor = "green"
-      }, 100 * (index + 1))
-    } else if (word.includes(input.value)) {
-      setTimeout(() => {
-        input.style.backgroundColor = "yellow"
-      }, 100 * (index + 1))
-    } else {
-      setTimeout(() => {
-        input.style.backgroundColor = "red"
-      }, 100 * (index + 1))
+  const guess = inputs.value[inputIndex].values.join("")
+
+  // Подсчитываем количество каждой буквы в загаданном слове
+  const letterCounts = new Map<string, number>()
+  for (const letter of word) {
+    letterCounts.set(letter, (letterCounts.get(letter) || 0) + 1)
+  }
+
+  // Массив результатов для каждой позиции
+  const results: ('correct' | 'present' | 'absent')[] = Array(length).fill('absent')
+
+  // Первый проход: отмечаем точные совпадения (зелёные)
+  for (let i = 0; i < length; i++) {
+    if (guess[i] === word[i]) {
+      results[i] = 'correct'
+      letterCounts.set(guess[i], letterCounts.get(guess[i])! - 1)
     }
+  }
+
+  // Второй проход: отмечаем буквы на неправильных позициях (жёлтые)
+  for (let i = 0; i < length; i++) {
+    if (results[i] !== 'correct' && letterCounts.get(guess[i])! > 0) {
+      results[i] = 'present'
+      letterCounts.set(guess[i], letterCounts.get(guess[i])! - 1)
+    }
+  }
+
+  // Применяем цвета с анимацией
+  inputs.value[inputIndex].refs.forEach((input, index) => {
+    if (!input) return
+    setTimeout(() => {
+      const color = results[index] === 'correct' ? 'green'
+                  : results[index] === 'present' ? 'yellow'
+                  : 'red'
+      input.style.backgroundColor = color
+    }, 100 * (index + 1))
   })
 }
 
 const handleKeyDown = async (inputIndex: number, index: number, event: KeyboardEvent) => {
+  // Блокируем ввод, если игра завершена
+  if (gameStatus.value !== 'playing') {
+    return
+  }
+
   if (event.key === "Backspace") {
     if (index > 0 && !inputs.value[inputIndex].values[index]) {
       event.preventDefault()
       inputs.value[inputIndex].values[index - 1] = ""
       await nextTick()
-      inputs.value[inputIndex].refs[index - 1].focus()
+      inputs.value[inputIndex].refs[index - 1]?.focus()
     }
   }
 
   if (event.key === "Enter" && inputs.value[inputIndex].values.every((value) => value !== "")) {
     await check(inputIndex)
-    if (inputs.value[inputIndex].values.join("") !== word) {
+    const guess = inputs.value[inputIndex].values.join("")
+
+    if (guess === word) {
+      // Выигрыш!
+      gameStatus.value = 'won'
+      inputs.value[inputIndex].isLocked = true
+      setTimeout(() => {
+        alert(`🎉 Поздравляем! Вы угадали слово "${word}" за ${inputIndex + 1} попыток!`)
+      }, 600)
+    } else if (inputIndex === maxAttempts - 1) {
+      // Проигрыш - закончились попытки
+      gameStatus.value = 'lost'
+      inputs.value[inputIndex].isLocked = true
+      setTimeout(() => {
+        alert(`😢 Игра окончена! Загаданное слово: "${word}"`)
+      }, 600)
+    } else {
+      // Переходим к следующей попытке
       inputs.value[inputIndex].isLocked = true
       inputs.value[inputIndex + 1].isLocked = false
     }
@@ -60,7 +109,7 @@ const handleKeyDown = async (inputIndex: number, index: number, event: KeyboardE
 
 const handleInput = (inputIndex: number, index: number) => {
   if (index < length - 1) {
-    inputs.value[inputIndex].refs[index + 1].focus()
+    inputs.value[inputIndex].refs[index + 1]?.focus()
   }
 }
 </script>
